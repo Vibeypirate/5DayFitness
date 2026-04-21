@@ -1,0 +1,367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ParticipantStatus {
+  ACTIVE
+  LEFT_GROUP
+  PAUSED
+  REMOVED
+}
+
+enum SessionStatus {
+  OPEN
+  COMPLETED
+  INVALIDATED
+}
+
+enum AdminActionType {
+  SETUP_GROUP
+  UPDATE_SETTINGS
+  ADD_PARTICIPANT
+  REMOVE_PARTICIPANT
+  PAUSE_PARTICIPANT
+  RESUME_PARTICIPANT
+  OVERRIDE_COMPLETE
+  OVERRIDE_PENALTY
+  START_CHALLENGE
+  RESET_CHALLENGE
+  RESET_WEEK
+  EXPORT_CSV
+}
+
+enum ScheduledJobType {
+  DAILY_REMINDER
+  LATE_REMINDER
+  DAILY_RESET
+  WEEKLY_SUMMARY
+  WEEKLY_RESET
+}
+
+enum ScheduledJobStatus {
+  SUCCEEDED
+  SKIPPED
+  FAILED
+}
+
+enum PenaltyLedgerType {
+  OWED
+  EARNED
+  UNRESOLVED
+  MANUAL_ADJUSTMENT
+  LEAVE_PENALTY
+}
+
+enum WorkoutPhotoReviewPhase {
+  CHECK_IN
+  CHECK_OUT
+}
+
+enum WorkoutPhotoReviewStatus {
+  OPEN
+  PASSED
+  FAILED
+  TIE_BREAK_PENDING
+}
+
+enum PendingChallengeStatus {
+  WAITING_FOR_REASON
+  EXPIRED
+  COMPLETED
+}
+
+model Group {
+  id                String                @id @default(cuid())
+  telegramChatId    String                @unique
+  telegramTitle     String
+  telegramUsername  String?
+  isActive          Boolean               @default(true)
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+  settings          GroupSettings?
+  participants      GroupParticipant[]
+  workoutSessions   WorkoutSession[]
+  workoutCredits    WorkoutDayCredit[]
+  weeklySnapshots   WeeklySnapshot[]
+  penaltyLedgers    PenaltyLedger[]
+  adminActions      AdminActionLog[]
+  scheduledJobLogs  ScheduledJobLog[]
+  workoutPhotoReviews WorkoutPhotoReview[]
+  pendingPhotoChallenges PendingPhotoChallenge[]
+}
+
+model GroupSettings {
+  id                    String   @id @default(cuid())
+  groupId               String   @unique
+  ownerUserId           String?
+  timezone              String   @default("Asia/Bangkok")
+  weeklyTarget          Int      @default(5)
+  weeklyPenaltyAmount   Int      @default(1000)
+  minSessionMinutes     Int      @default(20)
+  reminderTime          String   @default("20:00")
+  lateReminderTime      String?
+  automationEnabled     Boolean  @default(false)
+  challengeStartedAt    DateTime?
+  allowSelfPause        Boolean  @default(true)
+  checkInTriggers       String[]
+  checkOutTriggers      String[]
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  group                 Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  owner                 User?    @relation("GroupOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+}
+
+model User {
+  id                String             @id @default(cuid())
+  telegramUserId    String             @unique
+  username          String?
+  firstName         String
+  lastName          String?
+  displayName       String
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  participants      GroupParticipant[]
+  sessions          WorkoutSession[]
+  workoutCredits    WorkoutDayCredit[]
+  weeklyResults     WeeklyParticipantResult[]
+  penalties         PenaltyLedger[]
+  adminActions      AdminActionLog[]
+  ownedGroups       GroupSettings[] @relation("GroupOwner")
+  openedWorkoutPhotoReviews WorkoutPhotoReview[] @relation("WorkoutPhotoReviewOpenedBy")
+  targetedWorkoutPhotoReviews WorkoutPhotoReview[] @relation("WorkoutPhotoReviewTargetUser")
+  workoutPhotoReviewVotes WorkoutPhotoReviewVote[]
+  pendingPhotoChallengesOpened PendingPhotoChallenge[] @relation("PendingPhotoChallengeChallenger")
+  pendingPhotoChallengesTargeted PendingPhotoChallenge[] @relation("PendingPhotoChallengeTarget")
+}
+
+model GroupParticipant {
+  id                         String              @id @default(cuid())
+  groupId                    String
+  userId                     String
+  status                     ParticipantStatus   @default(ACTIVE)
+  joinedAt                   DateTime            @default(now())
+  joinedWeekStartDateLocal   String?
+  leftAt                     DateTime?
+  pausedAt                   DateTime?
+  resumedAt                  DateTime?
+  currentWorkoutDayStreak    Int                 @default(0)
+  longestWorkoutDayStreak    Int                 @default(0)
+  currentSuccessfulWeekStreak Int                @default(0)
+  longestSuccessfulWeekStreak Int                @default(0)
+  lifetimeCompletedDays      Int                 @default(0)
+  totalSuccessfulWeeks       Int                 @default(0)
+  totalFailedWeeks           Int                 @default(0)
+  totalPenaltiesOwed         Int                 @default(0)
+  totalPenaltiesEarned       Int                 @default(0)
+  lastCompletedWorkoutDate   String?
+  createdAt                  DateTime            @default(now())
+  updatedAt                  DateTime            @updatedAt
+  group                      Group               @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user                       User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weeklyResults              WeeklyParticipantResult[]
+
+  @@unique([groupId, userId])
+  @@index([groupId, status])
+}
+
+model WorkoutSession {
+  id                 String        @id @default(cuid())
+  groupId            String
+  userId             String
+  participantId      String
+  status             SessionStatus @default(OPEN)
+  checkInAtUtc       DateTime
+  checkOutAtUtc      DateTime?
+  creditDateLocal    String
+  timezone           String
+  checkInPhotoFileId String?
+  checkInMessageId   Int?
+  checkOutPhotoFileId String?
+  checkOutMessageId  Int?
+  checkInCaption     String?
+  checkOutCaption    String?
+  durationMinutes    Int?
+  invalidReason      String?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  group              Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user               User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workoutPhotoReviews WorkoutPhotoReview[]
+
+  @@index([groupId, userId, status])
+  @@index([groupId, creditDateLocal])
+  @@unique([groupId, checkInMessageId])
+  @@unique([groupId, checkOutMessageId])
+}
+
+model WorkoutDayCredit {
+  id                  String   @id @default(cuid())
+  groupId             String
+  userId              String
+  participantId       String
+  workoutSessionId    String?  @unique
+  creditDateLocal     String
+  weekStartDateLocal  String
+  timezone            String
+  source              String
+  createdAt           DateTime @default(now())
+  group               Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId, creditDateLocal])
+  @@index([groupId, weekStartDateLocal])
+}
+
+model WeeklySnapshot {
+  id                   String                    @id @default(cuid())
+  groupId              String
+  weekStartDateLocal   String
+  weekEndDateLocal     String
+  timezone             String
+  weeklyTarget         Int
+  weeklyPenaltyAmount  Int
+  summaryMessage       String?
+  unresolvedPenaltyPool Int                     @default(0)
+  createdAt            DateTime                  @default(now())
+  group                Group                     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  results              WeeklyParticipantResult[]
+  penaltyLedgers       PenaltyLedger[]
+
+  @@unique([groupId, weekStartDateLocal])
+}
+
+model WeeklyParticipantResult {
+  id                         String          @id @default(cuid())
+  weeklySnapshotId           String
+  groupId                    String
+  participantId              String
+  userId                     String
+  completedDays              Int
+  metTarget                  Boolean
+  workoutsLeftAtClose        Int
+  rank                       Int
+  currentWorkoutDayStreak    Int
+  currentSuccessfulWeekStreak Int
+  lifetimeCompletedDays      Int
+  totalSuccessfulWeeks       Int
+  totalFailedWeeks           Int
+  penaltyOwed                Int             @default(0)
+  penaltyEarned              Int             @default(0)
+  createdAt                  DateTime        @default(now())
+  weeklySnapshot             WeeklySnapshot  @relation(fields: [weeklySnapshotId], references: [id], onDelete: Cascade)
+  participant                GroupParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  user                       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([weeklySnapshotId, participantId])
+  @@index([groupId, rank])
+}
+
+model PenaltyLedger {
+  id                 String            @id @default(cuid())
+  groupId            String
+  weeklySnapshotId   String?
+  userId             String?
+  type               PenaltyLedgerType
+  amount             Int
+  description        String
+  createdAt          DateTime          @default(now())
+  group              Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  weeklySnapshot     WeeklySnapshot?   @relation(fields: [weeklySnapshotId], references: [id], onDelete: SetNull)
+  user               User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([groupId, createdAt])
+}
+
+model AdminActionLog {
+  id                String          @id @default(cuid())
+  groupId           String
+  actorUserId       String
+  actionType        AdminActionType
+  payloadJson       Json
+  createdAt         DateTime        @default(now())
+  group             Group           @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actor             User            @relation(fields: [actorUserId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+}
+
+model ScheduledJobLog {
+  id                 String             @id @default(cuid())
+  groupId            String
+  jobType            ScheduledJobType
+  jobKey             String
+  runAtUtc           DateTime
+  status             ScheduledJobStatus
+  message            String?
+  createdAt          DateTime           @default(now())
+  group              Group              @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, jobType, jobKey])
+  @@index([runAtUtc])
+}
+
+model WorkoutPhotoReview {
+  id                 String                   @id @default(cuid())
+  groupId            String
+  workoutSessionId   String
+  targetUserId       String
+  openedByUserId     String
+  phase              WorkoutPhotoReviewPhase
+  status             WorkoutPhotoReviewStatus @default(OPEN)
+  creditDateLocal    String
+  reason             String?
+  reviewMessageId    Int?                     @unique
+  requiredVoterCount Int
+  reviewDeadlineAt   DateTime?
+  reminderLastSentAt DateTime?
+  tieBreakRequestedAt DateTime?
+  tieBreakMessageId  Int?                     @unique
+  resolvedAt         DateTime?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+  group              Group                    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  workoutSession     WorkoutSession           @relation(fields: [workoutSessionId], references: [id], onDelete: Cascade)
+  targetUser         User                     @relation("WorkoutPhotoReviewTargetUser", fields: [targetUserId], references: [id], onDelete: Cascade)
+  openedBy           User                     @relation("WorkoutPhotoReviewOpenedBy", fields: [openedByUserId], references: [id], onDelete: Cascade)
+  votes              WorkoutPhotoReviewVote[]
+
+  @@index([groupId, status, createdAt])
+}
+
+model WorkoutPhotoReviewVote {
+  id                  String              @id @default(cuid())
+  workoutPhotoReviewId String
+  voterUserId         String
+  vote                Boolean?
+  viaTieBreak         Boolean             @default(false)
+  votedAt             DateTime?
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  workoutPhotoReview  WorkoutPhotoReview  @relation(fields: [workoutPhotoReviewId], references: [id], onDelete: Cascade)
+  voter               User                @relation(fields: [voterUserId], references: [id], onDelete: Cascade)
+
+  @@unique([workoutPhotoReviewId, voterUserId])
+  @@index([voterUserId, createdAt])
+}
+
+model PendingPhotoChallenge {
+  id               String                 @id @default(cuid())
+  groupId          String
+  challengerUserId String
+  targetUserId     String
+  status           PendingChallengeStatus @default(WAITING_FOR_REASON)
+  expiresAt        DateTime
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  group            Group                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  challenger       User                   @relation("PendingPhotoChallengeChallenger", fields: [challengerUserId], references: [id], onDelete: Cascade)
+  targetUser       User                   @relation("PendingPhotoChallengeTarget", fields: [targetUserId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, challengerUserId, status])
+  @@index([groupId, expiresAt])
+}
