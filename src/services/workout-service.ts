@@ -1,6 +1,7 @@
 import { ParticipantStatus, SessionStatus } from '@prisma/client';
 
 import { prisma } from '../db.js';
+import { DEFAULT_MAX_CHECKOUT_HOURS } from '../domain/constants.js';
 import { formatRankingLine, rankLeaderboard } from '../domain/leaderboard.js';
 import { applyWorkoutDayStreak } from '../domain/streaks.js';
 import { localDate, minutesBetween, startOfWeekLocal } from '../domain/time.js';
@@ -51,6 +52,22 @@ export class WorkoutService {
 
     if (!openSession) {
       return this.startSession(participant, settings, input);
+    }
+
+    const ageHours = (input.sentAt.getTime() - openSession.checkInAtUtc.getTime()) / 3600000;
+    if (ageHours > DEFAULT_MAX_CHECKOUT_HOURS) {
+      await prisma.workoutSession.update({
+        where: { id: openSession.id },
+        data: {
+          status: SessionStatus.ABANDONED,
+          abandonedAtUtc: new Date(),
+          abandonedReason: 'EXPIRED',
+        },
+      });
+      const newSessionResponse = await this.startSession(participant, settings, input);
+      return {
+        primary: `Your previous workout from ${this.formatLocalTime(openSession.checkInAtUtc, settings.timezone)} was abandoned because you didn't check out within ${DEFAULT_MAX_CHECKOUT_HOURS} hours.\n\n${newSessionResponse.primary}`,
+      };
     }
 
     return this.completeSession(participant, settings, input, openSession);
@@ -123,9 +140,17 @@ export class WorkoutService {
     }
 
     const ageHours = (input.sentAt.getTime() - openSession.checkInAtUtc.getTime()) / 3600000;
-    if (ageHours > 24) {
+    if (ageHours > DEFAULT_MAX_CHECKOUT_HOURS) {
+      await prisma.workoutSession.update({
+        where: { id: openSession.id },
+        data: {
+          status: SessionStatus.ABANDONED,
+          abandonedAtUtc: new Date(),
+          abandonedReason: 'EXPIRED',
+        },
+      });
       return {
-        primary: 'Checkout rejected. Check-out must happen within 24 hours of check-in.',
+        primary: `Check-out rejected. You must check out within ${DEFAULT_MAX_CHECKOUT_HOURS} hours of check-in. Your previous session has been abandoned. Please check in again to start a new workout.`,
       };
     }
 
