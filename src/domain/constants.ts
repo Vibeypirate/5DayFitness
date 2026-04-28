@@ -18,5 +18,6 @@ export const DEFAULT_CHECK_OUT_TRIGGERS = [
 export const DEFAULT_WEEKLY_TARGET = 5;
 export const DEFAULT_WEEKLY_PENALTY = 1000;
 export const DEFAULT_MIN_SESSION_MINUTES = 30;
+export const DEFAULT_MAX_CHECKOUT_HOURS = 6;
 export const DEFAULT_TIMEZONE = 'Asia/Bangkok';
 export const DEFAULT_REMINDER_TIME = '20:00';

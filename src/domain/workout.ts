@@ -1,3 +1,4 @@
+import { DEFAULT_MAX_CHECKOUT_HOURS } from './constants.js';
 import { minutesBetween } from './time.js';
 
 export type StartWorkoutInput = {
@@ -55,8 +56,8 @@ export function validateCheckOut(input: FinishWorkoutInput): string | null {
   }
 
   const ageHours = (input.checkedOutAtUtc.getTime() - input.checkedInAtUtc.getTime()) / 3600000;
-  if (ageHours > 24) {
-    return 'Checkout rejected. Check-out must happen within 24 hours of check-in.';
+  if (ageHours > DEFAULT_MAX_CHECKOUT_HOURS) {
+    return `Checkout rejected. Check-out must happen within ${DEFAULT_MAX_CHECKOUT_HOURS} hours of check-in.`;
   }
 
   if (input.alreadyCreditedToday) {

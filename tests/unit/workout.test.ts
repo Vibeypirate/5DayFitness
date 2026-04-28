@@ -31,4 +31,32 @@ describe('workout validation', () => {
     expect(shouldCreditWorkoutDay(false)).toBe(true);
     expect(shouldCreditWorkoutDay(true)).toBe(false);
   });
+
+  it('rejects check-out older than 6 hours', () => {
+    expect(
+      validateCheckOut({
+        hasPhoto: true,
+        matchedTrigger: true,
+        openSessionExists: true,
+        alreadyCreditedToday: false,
+        minSessionMinutes: 20,
+        checkedInAtUtc: new Date('2026-03-30T10:00:00.000Z'),
+        checkedOutAtUtc: new Date('2026-03-30T16:01:00.000Z'),
+      }),
+    ).toContain('6 hours');
+  });
+
+  it('accepts check-out within 6 hours', () => {
+    expect(
+      validateCheckOut({
+        hasPhoto: true,
+        matchedTrigger: true,
+        openSessionExists: true,
+        alreadyCreditedToday: false,
+        minSessionMinutes: 20,
+        checkedInAtUtc: new Date('2026-03-30T10:00:00.000Z'),
+        checkedOutAtUtc: new Date('2026-03-30T15:59:00.000Z'),
+      }),
+    ).toBeNull();
+  });
 });
