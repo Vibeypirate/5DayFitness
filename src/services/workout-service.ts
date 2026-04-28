@@ -250,18 +250,13 @@ export class WorkoutService {
         },
       },
       include: {
-        participant: {
-          include: {
-            user: true,
-          },
-        },
-        group: true,
+        user: true,
       },
     });
 
     return sessions.map((session) => ({
       groupId: session.groupId,
-      message: `@${session.participant.user.username ?? session.participant.user.displayName}, you checked in 5 hours ago. You have 1 hour left to check out or this session will be abandoned.`,
+      message: `@${session.user.username ?? session.user.displayName}, you checked in 5 hours ago. You have 1 hour left to check out or this session will be abandoned.`,
     }));
   }
 

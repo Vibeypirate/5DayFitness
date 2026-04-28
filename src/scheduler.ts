@@ -9,11 +9,13 @@ import { logger } from './logger.js';
 import { ReminderService } from './services/reminder-service.js';
 import { WeeklyRollupService } from './services/weekly-rollup-service.js';
 import { WorkoutPhotoReviewService } from './services/workout-photo-review-service.js';
+import { WorkoutService } from './services/workout-service.js';
 import type { Bot } from 'grammy';
 
 const reminderService = new ReminderService();
 const weeklyRollupService = new WeeklyRollupService();
 const workoutPhotoReviewService = new WorkoutPhotoReviewService();
+const workoutService = new WorkoutService();
 
 export function startScheduler(bot: Bot) {
   const task = cron.schedule('* * * * *', async () => {
