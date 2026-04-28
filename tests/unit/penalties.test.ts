@@ -99,4 +99,18 @@ describe('penalty distribution', () => {
       netBalance: -667,
     });
   });
+
+  it('penalizes member who missed target due to abandoned session', () => {
+    const result = calculatePenaltyDistribution(
+      [
+        { participantId: 'a', displayName: 'A', completedDays: 5 },
+        { participantId: 'b', displayName: 'B', completedDays: 4 }, // 1 day abandoned
+      ],
+      5,
+      1000,
+    );
+
+    expect(result.failures).toEqual([{ participantId: 'b', displayName: 'B', amountOwed: 1000 }]);
+    expect(result.earners).toEqual([{ participantId: 'a', displayName: 'A', amountEarned: 1000 }]);
+  });
 });
