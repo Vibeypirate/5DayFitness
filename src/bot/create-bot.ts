@@ -296,6 +296,22 @@ export function createBot() {
     }
   });
 
+  bot.command('voidsession', async (ctx) => {
+    try {
+      const { group, user } = await ensureGroupAndActor(ctx);
+      const target = await resolveUserFromArgument(ctx.match);
+      const result = await workoutPhotoReviewService.beginVoidVote(
+        group.id,
+        user.id,
+        target.id,
+      );
+      const sent = await ctx.reply(result.message, { parse_mode: 'Markdown' });
+      await workoutPhotoReviewService.attachReviewMessageId(result.reviewId, sent.message_id);
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Void vote failed.');
+    }
+  });
+
   bot.on('message:photo', async (ctx) => {
     try {
       const { group, user } = await ensureGroupAndActor(ctx);

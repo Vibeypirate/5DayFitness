@@ -3,6 +3,7 @@ import {
   SessionStatus,
   WorkoutPhotoReviewPhase,
   WorkoutPhotoReviewStatus,
+  WorkoutPhotoReviewType,
 } from '@prisma/client';
 
 import { prisma } from '../db.js';
@@ -182,6 +183,158 @@ export class WorkoutPhotoReviewService {
     });
   }
 
+  async beginVoidVote(
+    groupId: string,
+    initiatorUserId: string,
+    targetUserId: string,
+  ): Promise<{ reviewId: string; message: string }> {
+    const initiator = await getParticipant(groupId, initiatorUserId);
+    if (!initiator || initiator.status !== ParticipantStatus.ACTIVE) {
+      throw new Error('Only active challenge members can initiate a void vote.');
+    }
+
+    const targetParticipant = await getParticipant(groupId, targetUserId);
+    if (!targetParticipant || targetParticipant.status !== ParticipantStatus.ACTIVE) {
+      throw new Error('Target user must currently be in the challenge.');
+    }
+
+    if (initiatorUserId === targetUserId) {
+      throw new Error('You cannot void your own workout session.');
+    }
+
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { settings: true },
+    });
+    if (!group?.settings) {
+      throw new Error('Run /setup first.');
+    }
+
+    const session = await this.findLatestReviewableSession(
+      groupId,
+      targetUserId,
+      group.settings.timezone,
+    );
+    if (!session) {
+      throw new Error('Could not find a recent workout session for that user.');
+    }
+
+    if (session.status === SessionStatus.INVALIDATED) {
+      throw new Error('That session has already been voided.');
+    }
+
+    const eligibleParticipants = await prisma.groupParticipant.findMany({
+      where: {
+        groupId,
+        status: ParticipantStatus.ACTIVE,
+        userId: {
+          not: targetUserId,
+        },
+      },
+      include: {
+        user: true,
+      },
+      orderBy: {
+        user: {
+          displayName: 'asc',
+        },
+      },
+    });
+
+    if (eligibleParticipants.length === 0) {
+      throw new Error('There are no eligible voters for this void vote.');
+    }
+
+    const review = await prisma.workoutPhotoReview.create({
+      data: {
+        groupId,
+        workoutSessionId: session.id,
+        targetUserId: session.userId,
+        openedByUserId: initiatorUserId,
+        phase: session.checkOutPhotoFileId
+          ? WorkoutPhotoReviewPhase.CHECK_OUT
+          : WorkoutPhotoReviewPhase.CHECK_IN,
+        creditDateLocal: session.creditDateLocal,
+        reviewType: WorkoutPhotoReviewType.VOID_VOTE,
+        requiredVoterCount: eligibleParticipants.length,
+        reviewDeadlineAt: new Date(Date.now() + 6 * 60 * 60 * 1000),
+        votes: {
+          create: eligibleParticipants.map((participant) => ({
+            voterUserId: participant.userId,
+          })),
+        },
+      },
+    });
+
+    const mentions = eligibleParticipants
+      .map((participant) => participant.user.username ?? participant.user.displayName)
+      .map((value) => (value.startsWith('@') ? value : `@${value}`))
+      .join(' ');
+
+    return {
+      reviewId: review.id,
+      message: [
+        `*Void vote opened*`,
+        `${mentions}`.trim(),
+        `Vote to void ${session.user.displayName}'s workout on ${session.creditDateLocal}.`,
+        `React with ${THUMBS_UP} to void or ${THUMBS_DOWN} to keep.`,
+        `Majority wins. No tie-break. Voting closes in 6 hours.`,
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    };
+  }
+
+  async resolveVoidVoteIfMajority(reviewId: string): Promise<{ passed: boolean; message: string } | null> {
+    const review = await prisma.workoutPhotoReview.findUnique({
+      where: { id: reviewId },
+      include: {
+        targetUser: true,
+        votes: true,
+      },
+    });
+    if (!review || review.status !== 'OPEN' || review.reviewType !== WorkoutPhotoReviewType.VOID_VOTE) {
+      return null;
+    }
+
+    const totalEligible = review.votes.length;
+    const yesVotes = review.votes.filter((v) => v.vote === true).length;
+    const noVotes = review.votes.filter((v) => v.vote === false).length;
+
+    const majorityThreshold = Math.floor(totalEligible / 2) + 1;
+
+    if (yesVotes >= majorityThreshold) {
+      await this.invalidateSessionFromReview(reviewId);
+      await prisma.workoutPhotoReview.update({
+        where: { id: reviewId },
+        data: {
+          status: WorkoutPhotoReviewStatus.PASSED,
+          resolvedAt: new Date(),
+        },
+      });
+      return {
+        passed: true,
+        message: `Void vote passed for ${review.targetUser.displayName}. Final votes: ${yesVotes} yes, ${noVotes} no. The workout has been cancelled.`,
+      };
+    }
+
+    if (noVotes >= majorityThreshold) {
+      await prisma.workoutPhotoReview.update({
+        where: { id: reviewId },
+        data: {
+          status: WorkoutPhotoReviewStatus.FAILED,
+          resolvedAt: new Date(),
+        },
+      });
+      return {
+        passed: false,
+        message: `Void vote failed for ${review.targetUser.displayName}. Final votes: ${yesVotes} yes, ${noVotes} no. The workout stays valid.`,
+      };
+    }
+
+    return null;
+  }
+
   async recordReactionVote(input: {
     groupId: string;
     reviewMessageId: number;
@@ -265,6 +418,13 @@ export class WorkoutPhotoReviewService {
         votedAt: new Date(),
       },
     });
+
+    if (review.reviewType === WorkoutPhotoReviewType.VOID_VOTE) {
+      const resolution = await this.resolveVoidVoteIfMajority(review.id);
+      if (resolution) {
+        return resolution.message;
+      }
+    }
 
     const refreshedReview = await prisma.workoutPhotoReview.findUnique({
       where: { id: review.id },
@@ -372,6 +532,22 @@ export class WorkoutPhotoReviewService {
     for (const review of reviews) {
       const yesVotes = review.votes.filter((entry) => entry.vote === true).length;
       const noVotes = review.votes.filter((entry) => entry.vote === false).length;
+
+      if (review.reviewType === WorkoutPhotoReviewType.VOID_VOTE) {
+        // Void votes without majority by deadline → FAILED (workout stands)
+        await prisma.workoutPhotoReview.update({
+          where: { id: review.id },
+          data: {
+            status: WorkoutPhotoReviewStatus.FAILED,
+            resolvedAt: now,
+          },
+        });
+        results.push({
+          groupId: review.groupId,
+          message: `Void vote expired for ${review.targetUser.displayName}. No majority reached. The workout stays valid.`,
+        });
+        continue;
+      }
 
       if (yesVotes > noVotes) {
         await this.invalidateSessionFromReview(review.id);
