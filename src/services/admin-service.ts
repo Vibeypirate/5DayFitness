@@ -204,6 +204,34 @@ export class AdminService {
     return 'Penalty adjustment saved.';
   }
 
+  async resetBalances(groupId: string, actorUserId: string): Promise<string> {
+    await prisma.$transaction(async (tx) => {
+      await tx.penaltyLedger.deleteMany({ where: { groupId } });
+      await tx.weeklySnapshot.deleteMany({ where: { groupId } });
+      await tx.weeklyParticipantResult.deleteMany({ where: { groupId } });
+      await tx.groupParticipant.updateMany({
+        where: { groupId },
+        data: {
+          totalPenaltiesOwed: 0,
+          totalPenaltiesEarned: 0,
+          totalSuccessfulWeeks: 0,
+          totalFailedWeeks: 0,
+          currentSuccessfulWeekStreak: 0,
+          longestSuccessfulWeekStreak: 0,
+        },
+      });
+    });
+
+    await logAdminAction({
+      groupId,
+      actorUserId,
+      actionType: AdminActionType.RESET_BALANCES,
+      payloadJson: {},
+    });
+
+    return 'All penalty balances and weekly history have been reset. Everyone starts fresh from this week.';
+  }
+
   async recordLeaveFromGroup(groupId: string, targetUserId: string, leftAt: Date): Promise<void> {
     const group = await prisma.group.findUnique({
       where: { id: groupId },

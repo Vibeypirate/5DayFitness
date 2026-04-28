@@ -282,6 +282,16 @@ export function createBot() {
     }
   });
 
+  bot.command('resetbalances', async (ctx) => {
+    try {
+      await requireAdmin(ctx);
+      const { group, user } = await ensureGroupAndActor(ctx);
+      await ctx.reply(await adminService.resetBalances(group.id, user.id));
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Balance reset failed.');
+    }
+  });
+
   bot.command('challengephoto', async (ctx) => {
     try {
       const { group, user } = await ensureGroupAndActor(ctx);
