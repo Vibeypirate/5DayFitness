@@ -237,6 +237,34 @@ export class WorkoutService {
     };
   }
 
+  async sendExpiryReminders(now: Date): Promise<Array<{ groupId: string; message: string }>> {
+    const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
+    const fiveHoursOneMinuteAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000 - 60 * 1000);
+
+    const sessions = await prisma.workoutSession.findMany({
+      where: {
+        status: SessionStatus.OPEN,
+        checkInAtUtc: {
+          lte: fiveHoursAgo,
+          gte: fiveHoursOneMinuteAgo,
+        },
+      },
+      include: {
+        participant: {
+          include: {
+            user: true,
+          },
+        },
+        group: true,
+      },
+    });
+
+    return sessions.map((session) => ({
+      groupId: session.groupId,
+      message: `@${session.participant.user.username ?? session.participant.user.displayName}, you checked in 5 hours ago. You have 1 hour left to check out or this session will be abandoned.`,
+    }));
+  }
+
   async getWeekProgress(groupId: string, userId: string, timezone: string): Promise<number> {
     const weekStart = startOfWeekLocal(new Date(), timezone);
     return prisma.workoutDayCredit.count({

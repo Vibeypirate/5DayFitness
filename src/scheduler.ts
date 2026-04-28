@@ -134,6 +134,15 @@ export function startScheduler(bot: Bot) {
         }
       }
 
+      const expiryReminders = await workoutService.sendExpiryReminders(now);
+      for (const reminder of expiryReminders) {
+        const group = groups.find((entry) => entry.id === reminder.groupId);
+        if (!group) {
+          continue;
+        }
+        await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+      }
+
       const reviewReminders = await workoutPhotoReviewService.sendHourlyReminders(now);
       for (const reminder of reviewReminders) {
         const group = groups.find((entry) => entry.id === reminder.groupId);
