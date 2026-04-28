@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 import { config } from '../config.js';
+import { DEFAULT_MAX_CHECKOUT_HOURS } from '../domain/constants.js';
 import { logger } from '../logger.js';
 import { AdminService } from '../services/admin-service.js';
 import { ExportService } from '../services/export-service.js';
@@ -30,7 +31,7 @@ export function createBot() {
   bot.api.config.use((prev, method, payload, signal) => prev(method, payload, signal));
 
   bot.catch((error) => {
-    logger.error({ error }, 'Telegram update failed');
+    logger.error({ error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }, 'Telegram update failed');
   });
 
   bot.command('setup', async (ctx) => {
@@ -241,6 +242,44 @@ export function createBot() {
     }
   });
 
+  bot.command('complete', async (ctx) => {
+    logger.info({ command: 'complete', match: ctx.match, from: ctx.from?.id, chat: ctx.chat?.id }, 'Handling /complete command');
+    try {
+      await requireAdmin(ctx);
+      logger.info({ step: 'admin-ok' }, 'Admin check passed');
+      const { group, user } = await ensureGroupAndActor(ctx);
+      logger.info({ step: 'group-actor-ok', groupId: group.id, userId: user.id }, 'Group and actor resolved');
+      const target = await resolveUserFromArgument(ctx.match);
+      logger.info({ step: 'target-ok', targetId: target.id, targetUsername: target.username }, 'Target user resolved');
+      const targetParticipant = await getParticipant(group.id, target.id);
+      if (!targetParticipant) {
+        throw new Error('Target user is not a participant in this group.');
+      }
+      logger.info({ step: 'participant-ok', participantId: targetParticipant.id }, 'Target participant found');
+      const response = await workoutService.completeWorkoutForUser(
+        targetParticipant,
+        {
+          weeklyTarget: group.settings!.weeklyTarget,
+          minSessionMinutes: group.settings!.minSessionMinutes,
+          timezone: group.settings!.timezone,
+        },
+        {
+          groupId: group.id,
+          userId: target.id,
+        },
+      );
+      logger.info({ step: 'service-ok', hasLeaderboard: Boolean(response.leaderboard) }, 'Workout completion processed');
+      await ctx.reply(response.primary, { parse_mode: 'Markdown' });
+      if (response.leaderboard) {
+        await ctx.reply(response.leaderboard, { parse_mode: 'Markdown' });
+      }
+      logger.info({ step: 'replied' }, 'Reply sent for /complete');
+    } catch (error) {
+      logger.error({ error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }, '/complete command failed');
+      await ctx.reply(error instanceof Error ? error.message : 'Complete workout failed.');
+    }
+  });
+
   bot.command('overridepenalty', async (ctx) => {
     try {
       await requireAdmin(ctx);
@@ -357,6 +396,23 @@ export function createBot() {
     }
   });
 
+  bot.command('cancelsession', async (ctx) => {
+    logger.info({ command: 'cancelsession', from: ctx.from?.id, chat: ctx.chat?.id }, 'Handling /cancelsession command');
+    try {
+      const { group, user } = await ensureGroupAndActor(ctx);
+      if (!group.settings?.automationEnabled) {
+        await ctx.reply('Challenge has not started yet. An admin needs to run /startchallenge first.');
+        return;
+      }
+      const result = await workoutService.cancelOwnSession(group.id, user.id, group.settings!.timezone);
+      await ctx.reply(result.message);
+      logger.info({ step: 'replied' }, 'Reply sent for /cancelsession');
+    } catch (error) {
+      logger.error({ error: error instanceof Error ? error.message : String(error) }, '/cancelsession command failed');
+      await ctx.reply(error instanceof Error ? error.message : 'Cancel session failed.');
+    }
+  });
+
   bot.on('message:text', async (ctx) => {
     try {
       const isCommandMessage = ctx.message.entities?.some(
@@ -400,6 +456,14 @@ export function createBot() {
       );
 
       if (openSession) {
+        const ageHours = (Date.now() - openSession.checkInAtUtc.getTime()) / 3600000;
+        if (ageHours > DEFAULT_MAX_CHECKOUT_HOURS) {
+          await ctx.reply(
+            `Your previous workout from over ${DEFAULT_MAX_CHECKOUT_HOURS} hours ago is still open. It will be abandoned when you send your next workout photo, or you can use /cancelsession to cancel it now.`,
+          );
+          return;
+        }
+
         const minutesOpen = Math.max(
           0,
           Math.floor((Date.now() - openSession.checkInAtUtc.getTime()) / 60000),

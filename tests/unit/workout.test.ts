@@ -59,4 +59,18 @@ describe('workout validation', () => {
       }),
     ).toBeNull();
   });
+
+  it('accepts check-out at exactly 6 hours', () => {
+    expect(
+      validateCheckOut({
+        hasPhoto: true,
+        matchedTrigger: true,
+        openSessionExists: true,
+        alreadyCreditedToday: false,
+        minSessionMinutes: 20,
+        checkedInAtUtc: new Date('2026-03-30T10:00:00.000Z'),
+        checkedOutAtUtc: new Date('2026-03-30T16:00:00.000Z'),
+      }),
+    ).toBeNull();
+  });
 });

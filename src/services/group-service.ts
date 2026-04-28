@@ -91,6 +91,9 @@ export class GroupService {
       '/groupstats',
       '/rules',
       '/challengephoto @username',
+      '/voidsession @username',
+      '/cancelsession',
+      '/complete @username',
       '/startchallenge',
       '/resetchallenge',
     ].join('\n');
@@ -175,7 +178,7 @@ export class GroupService {
       `Weekly summary: Sunday 23:59`,
       `Target: ${group.settings.weeklyTarget} workout days`,
       `Max credit: 1 per calendar day`,
-      `Check-out window: 24 hours from check-in`,
+      `Check-out window: 6 hours from check-in`,
       `Min session: ${group.settings.minSessionMinutes} minutes`,
       `Automation: ${group.settings.automationEnabled ? 'ON' : 'OFF'}`,
       `Penalty per failed member: ${group.settings.weeklyPenaltyAmount} baht`,

@@ -260,6 +260,142 @@ export class WorkoutService {
     }));
   }
 
+  async cancelOwnSession(
+    groupId: string,
+    userId: string,
+    timezone: string,
+  ): Promise<{ success: boolean; message: string }> {
+    const openSession = await prisma.workoutSession.findFirst({
+      where: {
+        groupId,
+        userId,
+        status: SessionStatus.OPEN,
+      },
+      orderBy: {
+        checkInAtUtc: 'desc',
+      },
+    });
+
+    if (!openSession) {
+      return { success: false, message: 'You do not have an open workout session to cancel.' };
+    }
+
+    await prisma.workoutSession.update({
+      where: { id: openSession.id },
+      data: {
+        status: SessionStatus.ABANDONED,
+        abandonedAtUtc: new Date(),
+        abandonedReason: 'USER_CANCELLED',
+      },
+    });
+
+    return {
+      success: true,
+      message: `Your workout from ${this.formatLocalTime(openSession.checkInAtUtc, timezone)} has been cancelled. Send a photo to check in for a new workout.`,
+    };
+  }
+
+  async completeWorkoutForUser(
+    participant: ParticipantWithUser,
+    settings: {
+      weeklyTarget: number;
+      minSessionMinutes: number;
+      timezone: string;
+    },
+    input: {
+      groupId: string;
+      userId: string;
+    },
+  ): Promise<WorkoutResponse> {
+    const now = new Date();
+    const creditDateLocal = localDate(now, settings.timezone);
+    const weekStartDateLocal = startOfWeekLocal(now, settings.timezone);
+
+    const openSession = await prisma.workoutSession.findFirst({
+      where: {
+        groupId: input.groupId,
+        userId: input.userId,
+        status: SessionStatus.OPEN,
+      },
+    });
+
+    if (openSession) {
+      await prisma.workoutSession.update({
+        where: { id: openSession.id },
+        data: {
+          status: SessionStatus.ABANDONED,
+          abandonedAtUtc: now,
+          abandonedReason: 'ADMIN_COMPLETED',
+        },
+      });
+    }
+
+    const alreadyCreditedToday = Boolean(
+      await prisma.workoutDayCredit.findUnique({
+        where: {
+          groupId_userId_creditDateLocal: {
+            groupId: input.groupId,
+            userId: input.userId,
+            creditDateLocal,
+          },
+        },
+      }),
+    );
+
+    const shouldCredit = !alreadyCreditedToday;
+
+    await prisma.$transaction(async (tx) => {
+      if (shouldCredit) {
+        await tx.workoutDayCredit.create({
+          data: {
+            groupId: input.groupId,
+            userId: input.userId,
+            participantId: participant.id,
+            creditDateLocal,
+            weekStartDateLocal,
+            timezone: settings.timezone,
+            source: 'ADMIN_OVERRIDE',
+          },
+        });
+      }
+
+      const streak = applyWorkoutDayStreak(
+        participant.currentWorkoutDayStreak,
+        participant.longestWorkoutDayStreak,
+        participant.lastCompletedWorkoutDate,
+        creditDateLocal,
+      );
+
+      await tx.groupParticipant.update({
+        where: { id: participant.id },
+        data: {
+          currentWorkoutDayStreak: streak.currentStreak,
+          longestWorkoutDayStreak: streak.longestStreak,
+          lifetimeCompletedDays: {
+            increment: shouldCredit ? 1 : 0,
+          },
+          lastCompletedWorkoutDate: creditDateLocal,
+        },
+      });
+    });
+
+    const [weekProgress, leaderboard] = await Promise.all([
+      this.getWeekProgress(input.groupId, input.userId, settings.timezone),
+      this.getProgressLeaderboard(input.groupId),
+    ]);
+
+    return {
+      primary: [
+        `Good workout, ${participant.user.displayName}!`,
+        `You worked out for ${settings.minSessionMinutes} minutes.`,
+        `Today counted: ${shouldCredit ? 'Yes' : 'Already counted earlier'}`,
+        `Week progress: ${weekProgress}/${settings.weeklyTarget}`,
+        'See you again tomorrow. Great job staying fit.',
+      ].join('\n'),
+      leaderboard,
+    };
+  }
+
   async getWeekProgress(groupId: string, userId: string, timezone: string): Promise<number> {
     const weekStart = startOfWeekLocal(new Date(), timezone);
     return prisma.workoutDayCredit.count({

@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
 
 import { ensureGroup, getGroupByChatId, upsertUser } from '../services/persistence.js';
+import { logger } from '../logger.js';
 import type { TelegramActor, TelegramGroupRef } from '../types.js';
 
 export function requireGroupContext(ctx: Context): TelegramGroupRef {
@@ -49,8 +50,10 @@ export async function requireAdmin(ctx: Context): Promise<void> {
     throw new Error('Cannot verify admin status.');
   }
 
+  logger.info({ chatId: ctx.chat.id, userId: ctx.from.id }, 'Checking admin status');
   const admins = await ctx.getChatAdministrators();
   const isAdmin = admins.some((admin) => admin.user.id === ctx.from!.id);
+  logger.info({ chatId: ctx.chat.id, userId: ctx.from.id, isAdmin, adminCount: admins.length }, 'Admin check result');
   if (!isAdmin) {
     throw new Error('Admin command only.');
   }
