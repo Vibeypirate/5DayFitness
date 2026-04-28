@@ -18,6 +18,7 @@ enum SessionStatus {
   OPEN
   COMPLETED
   INVALIDATED
+  ABANDONED
 }
 
 enum AdminActionType {
@@ -60,6 +61,11 @@ enum PenaltyLedgerType {
 enum WorkoutPhotoReviewPhase {
   CHECK_IN
   CHECK_OUT
+}
+
+enum WorkoutPhotoReviewType {
+  CHALLENGE
+  VOID_VOTE
 }
 
 enum WorkoutPhotoReviewStatus {
@@ -187,6 +193,8 @@ model WorkoutSession {
   checkOutCaption    String?
   durationMinutes    Int?
   invalidReason      String?
+  abandonedAtUtc     DateTime?
+  abandonedReason    String?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   group              Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)
@@ -321,6 +329,7 @@ model WorkoutPhotoReview {
   reminderLastSentAt DateTime?
   tieBreakRequestedAt DateTime?
   tieBreakMessageId  Int?                     @unique
+  reviewType         WorkoutPhotoReviewType   @default(CHALLENGE)
   resolvedAt         DateTime?
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
