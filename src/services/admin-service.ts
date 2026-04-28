@@ -266,13 +266,15 @@ export class AdminService {
           description: 'Leave penalty',
         },
       });
-    });
 
-    await logAdminAction({
-      groupId,
-      actorUserId: targetUserId,
-      actionType: AdminActionType.REMOVE_PARTICIPANT,
-      payloadJson: { targetUserId, leftAt: leftAt.toISOString(), source: 'left_group' },
+      await tx.adminActionLog.create({
+        data: {
+          groupId,
+          actorUserId: targetUserId,
+          actionType: AdminActionType.REMOVE_PARTICIPANT,
+          payloadJson: { targetUserId, leftAt: leftAt.toISOString(), source: 'left_group' },
+        },
+      });
     });
   }
 }

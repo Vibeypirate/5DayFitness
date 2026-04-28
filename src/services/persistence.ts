@@ -85,7 +85,7 @@ export async function getParticipant(groupId: string, userId: string): Promise<P
   });
 }
 
-export async function ensureActiveParticipant(groupId: string, userId: string): Promise<ParticipantWithUser> {
+export async function ensureActiveParticipant(groupId: string, userId: string, timezone?: string): Promise<ParticipantWithUser> {
   await prisma.groupParticipant.upsert({
     where: {
       groupId_userId: {
@@ -103,7 +103,7 @@ export async function ensureActiveParticipant(groupId: string, userId: string): 
       groupId,
       userId,
       status: ParticipantStatus.ACTIVE,
-      joinedWeekStartDateLocal: startOfWeekLocal(new Date(), DEFAULT_TIMEZONE),
+      joinedWeekStartDateLocal: startOfWeekLocal(new Date(), timezone ?? DEFAULT_TIMEZONE),
     },
   });
 

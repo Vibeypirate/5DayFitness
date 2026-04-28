@@ -1,8 +1,9 @@
 import { Bot, InputFile, webhookCallback, type CommandContext, type Context } from 'grammy';
 import { SessionStatus } from '@prisma/client';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { prisma } from '../db.js';
 
 import { config } from '../config.js';
 import { DEFAULT_MAX_CHECKOUT_HOURS } from '../domain/constants.js';
@@ -27,8 +28,6 @@ const exportService = new ExportService();
 
 export function createBot() {
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
-
-  bot.api.config.use((prev, method, payload, signal) => prev(method, payload, signal));
 
   bot.catch((error) => {
     logger.error({ error: error instanceof Error ? error.message : String(error), stack: error instanceof Error ? error.stack : undefined }, 'Telegram update failed');
@@ -79,7 +78,8 @@ export function createBot() {
       }
 
       await ctx.reply(await groupService.getWelcomeMessage(group.telegramChatId));
-    } catch {
+    } catch (error) {
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'new_chat_members handler failed');
       return;
     }
   });
@@ -100,7 +100,8 @@ export function createBot() {
       });
 
       await adminService.recordLeaveFromGroup(group.id, user.id, new Date(ctx.message.date * 1000));
-    } catch {
+    } catch (error) {
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'left_chat_member handler failed');
       return;
     }
   });
@@ -172,28 +173,54 @@ export function createBot() {
     }
   });
 
-  bot.command('settarget', async (ctx) => handleAdminSetting(ctx, { weeklyTarget: parseInt(ctx.match, 10) }));
-  bot.command('setpenalty', async (ctx) =>
-    handleAdminSetting(ctx, { weeklyPenaltyAmount: parseInt(ctx.match, 10) }),
-  );
+  bot.command('settarget', async (ctx) => {
+    const value = parseInt(ctx.match, 10);
+    if (Number.isNaN(value)) {
+      await ctx.reply('Invalid target. Provide a number.');
+      return;
+    }
+    await handleAdminSetting(ctx, { weeklyTarget: value });
+  });
+  bot.command('setpenalty', async (ctx) => {
+    const value = parseInt(ctx.match, 10);
+    if (Number.isNaN(value)) {
+      await ctx.reply('Invalid penalty. Provide a number.');
+      return;
+    }
+    await handleAdminSetting(ctx, { weeklyPenaltyAmount: value });
+  });
   bot.command('settimezone', async (ctx) => handleAdminSetting(ctx, { timezone: ctx.match.trim() }));
-  bot.command('setminduration', async (ctx) =>
-    handleAdminSetting(ctx, { minSessionMinutes: parseInt(ctx.match, 10) }),
-  );
+  bot.command('setminduration', async (ctx) => {
+    const value = parseInt(ctx.match, 10);
+    if (Number.isNaN(value)) {
+      await ctx.reply('Invalid duration. Provide a number.');
+      return;
+    }
+    await handleAdminSetting(ctx, { minSessionMinutes: value });
+  });
   bot.command('setremindertime', async (ctx) =>
     handleAdminSetting(ctx, { reminderTime: ctx.match.trim() }),
   );
 
   bot.command('exportcsv', async (ctx) => {
+    let filePath: string | undefined;
     try {
       await requireAdmin(ctx);
       const { group } = await ensureGroupAndActor(ctx);
       const csv = await exportService.exportGroupCsv(group.id);
-      const filePath = join(tmpdir(), `fitness-${group.id}.csv`);
+      filePath = join(tmpdir(), `fitness-${group.id}.csv`);
       await writeFile(filePath, csv, 'utf8');
       await ctx.replyWithDocument(new InputFile(filePath));
     } catch (error) {
       await ctx.reply(error instanceof Error ? error.message : 'CSV export failed.');
+    } finally {
+      if (filePath) {
+        try {
+          await unlink(filePath);
+        } catch {
+          // ignore cleanup errors
+        }
+      }
     }
   });
 
@@ -369,7 +396,7 @@ export function createBot() {
         return;
       }
       const participant = (await getParticipant(group.id, user.id))
-        ?? (await ensureActiveParticipant(group.id, user.id));
+        ?? (await ensureActiveParticipant(group.id, user.id, group.settings!.timezone));
       const photo = ctx.message.photo.at(-1);
       const response = await workoutService.handleWorkoutMessage(
         participant,
@@ -442,18 +469,16 @@ export function createBot() {
         return;
       }
 
-      const openSession = await import('../db.js').then(({ prisma }) =>
-        prisma.workoutSession.findFirst({
-          where: {
-            groupId: group.id,
-            userId: user.id,
-            status: SessionStatus.OPEN,
-          },
-          orderBy: {
-            checkInAtUtc: 'desc',
-          },
-        }),
-      );
+      const openSession = await prisma.workoutSession.findFirst({
+        where: {
+          groupId: group.id,
+          userId: user.id,
+          status: SessionStatus.OPEN,
+        },
+        orderBy: {
+          checkInAtUtc: 'desc',
+        },
+      });
 
       if (openSession) {
         const ageHours = (Date.now() - openSession.checkInAtUtc.getTime()) / 3600000;
@@ -475,7 +500,8 @@ export function createBot() {
             : 'Workout in progress. Send your checkout photo when you are done.',
         );
       }
-    } catch {
+    } catch (error) {
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'text message handler failed');
       return;
     }
   });
@@ -499,7 +525,8 @@ export function createBot() {
       if (result) {
         await ctx.reply(result);
       }
-    } catch {
+    } catch (error) {
+      logger.warn({ error: error instanceof Error ? error.message : String(error) }, 'reaction handler failed');
       return;
     }
   });
@@ -536,10 +563,15 @@ async function resolveUserFromArgument(argument: string) {
 }
 
 async function resolveUserByHandle(username: string) {
-  const normalized = username.replace('@', '');
+  const normalized = username.replace('@', '').toLowerCase();
   const { prisma } = await import('../db.js');
   const user = await prisma.user.findFirst({
-    where: { username: normalized },
+    where: {
+      username: {
+        equals: normalized,
+        mode: 'insensitive',
+      },
+    },
   });
   if (!user) {
     throw new Error(`User @${normalized} not found in database.`);

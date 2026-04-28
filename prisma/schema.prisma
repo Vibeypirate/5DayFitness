@@ -196,6 +196,7 @@ model WorkoutSession {
   invalidReason      String?
   abandonedAtUtc     DateTime?
   abandonedReason    String?
+  expiryReminderSentAt DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   group              Group         @relation(fields: [groupId], references: [id], onDelete: Cascade)

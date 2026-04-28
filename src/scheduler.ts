@@ -18,7 +18,14 @@ const workoutPhotoReviewService = new WorkoutPhotoReviewService();
 const workoutService = new WorkoutService();
 
 export function startScheduler(bot: Bot) {
+  let isRunning = false;
+
   const task = cron.schedule('* * * * *', async () => {
+    if (isRunning) {
+      logger.warn('Scheduler tick skipped because previous tick is still running');
+      return;
+    }
+    isRunning = true;
     try {
       const now = new Date();
       const groups = await prisma.group.findMany({
@@ -57,7 +64,11 @@ export function startScheduler(bot: Bot) {
               message,
             );
             if (created) {
-              await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+              try {
+                await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+              } catch (sendError) {
+                logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send reminder message');
+              }
             }
           }
         }
@@ -79,7 +90,11 @@ export function startScheduler(bot: Bot) {
               message,
             );
             if (created) {
-              await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+              try {
+                await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+              } catch (sendError) {
+                logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send late reminder message');
+              }
             }
           }
         }
@@ -89,13 +104,17 @@ export function startScheduler(bot: Bot) {
           const message = reminderService.buildNewDayMessage(group.settings.weeklyTarget);
           const created = await reminderService.recordReminder(
             group.id,
-            'DAILY_RESET' as ScheduledJobType,
+            ScheduledJobType.DAILY_RESET,
             jobKey,
             now,
             message,
           );
           if (created) {
-            await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+            try {
+              await bot.api.sendMessage(Number(group.telegramChatId), message, { parse_mode: 'Markdown' });
+            } catch (sendError) {
+              logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send daily reset message');
+            }
           }
         }
 
@@ -119,7 +138,11 @@ export function startScheduler(bot: Bot) {
               reminder.message,
             );
             if (created) {
-              await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+              try {
+                await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+              } catch (sendError) {
+                logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send trial reminder message');
+              }
             }
           }
         }
@@ -127,7 +150,11 @@ export function startScheduler(bot: Bot) {
         if (weekday === 'Sun' && time === '23:59') {
           const summary = await weeklyRollupService.runWeeklySummary(group.id, now);
           if (summary) {
-            await bot.api.sendMessage(Number(group.telegramChatId), summary, { parse_mode: 'Markdown' });
+            try {
+              await bot.api.sendMessage(Number(group.telegramChatId), summary, { parse_mode: 'Markdown' });
+            } catch (sendError) {
+              logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send weekly summary');
+            }
           }
         }
 
@@ -142,7 +169,11 @@ export function startScheduler(bot: Bot) {
         if (!group) {
           continue;
         }
-        await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+        try {
+          await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+        } catch (sendError) {
+          logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send expiry reminder');
+        }
       }
 
       const reviewReminders = await workoutPhotoReviewService.sendHourlyReminders(now);
@@ -151,7 +182,11 @@ export function startScheduler(bot: Bot) {
         if (!group) {
           continue;
         }
-        await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+        try {
+          await bot.api.sendMessage(Number(group.telegramChatId), reminder.message, { parse_mode: 'Markdown' });
+        } catch (sendError) {
+          logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send review reminder');
+        }
       }
 
       const resolvedReviews = await workoutPhotoReviewService.resolveExpiredReviews(now);
@@ -160,10 +195,16 @@ export function startScheduler(bot: Bot) {
         if (!group) {
           continue;
         }
-        await bot.api.sendMessage(Number(group.telegramChatId), result.message, { parse_mode: 'Markdown' });
+        try {
+          await bot.api.sendMessage(Number(group.telegramChatId), result.message, { parse_mode: 'Markdown' });
+        } catch (sendError) {
+          logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send resolved review message');
+        }
       }
     } catch (error) {
       logger.error({ error }, 'Scheduler tick failed');
+    } finally {
+      isRunning = false;
     }
   });
 

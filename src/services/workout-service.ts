@@ -222,7 +222,7 @@ export class WorkoutService {
 
     const [weekProgress, leaderboard] = await Promise.all([
       this.getWeekProgress(input.groupId, input.userId, settings.timezone),
-      this.getProgressLeaderboard(input.groupId),
+      this.getProgressLeaderboard(input.groupId, settings.timezone),
     ]);
 
     return {
@@ -239,25 +239,35 @@ export class WorkoutService {
 
   async sendExpiryReminders(now: Date): Promise<Array<{ groupId: string; message: string }>> {
     const fiveHoursAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000);
-    const fiveHoursOneMinuteAgo = new Date(now.getTime() - 5 * 60 * 60 * 1000 - 60 * 1000);
 
     const sessions = await prisma.workoutSession.findMany({
       where: {
         status: SessionStatus.OPEN,
         checkInAtUtc: {
           lte: fiveHoursAgo,
-          gte: fiveHoursOneMinuteAgo,
         },
+        expiryReminderSentAt: null,
       },
       include: {
         user: true,
       },
     });
 
-    return sessions.map((session) => ({
-      groupId: session.groupId,
-      message: `@${session.user.username ?? session.user.displayName}, you checked in 5 hours ago. You have 1 hour left to check out or this session will be abandoned.`,
-    }));
+    const reminders: Array<{ groupId: string; message: string }> = [];
+
+    for (const session of sessions) {
+      reminders.push({
+        groupId: session.groupId,
+        message: `@${session.user.username ?? session.user.displayName}, you checked in 5 hours ago. You have 1 hour left to check out or this session will be abandoned.`,
+      });
+
+      await prisma.workoutSession.update({
+        where: { id: session.id },
+        data: { expiryReminderSentAt: now },
+      });
+    }
+
+    return reminders;
   }
 
   async cancelOwnSession(
@@ -381,13 +391,12 @@ export class WorkoutService {
 
     const [weekProgress, leaderboard] = await Promise.all([
       this.getWeekProgress(input.groupId, input.userId, settings.timezone),
-      this.getProgressLeaderboard(input.groupId),
+      this.getProgressLeaderboard(input.groupId, settings.timezone),
     ]);
 
     return {
       primary: [
-        `Good workout, ${participant.user.displayName}!`,
-        `You worked out for ${settings.minSessionMinutes} minutes.`,
+        `Workout completed for ${participant.user.displayName}.`,
         `Today counted: ${shouldCredit ? 'Yes' : 'Already counted earlier'}`,
         `Week progress: ${weekProgress}/${settings.weeklyTarget}`,
         'See you again tomorrow. Great job staying fit.',
@@ -407,7 +416,9 @@ export class WorkoutService {
     });
   }
 
-  async getProgressLeaderboard(groupId: string): Promise<string> {
+  async getProgressLeaderboard(groupId: string, timezone: string): Promise<string> {
+    const weekStart = startOfWeekLocal(new Date(), timezone);
+
     const participants = await prisma.groupParticipant.findMany({
       where: {
         groupId,
@@ -417,19 +428,31 @@ export class WorkoutService {
         user: true,
       },
     });
-    const sessions = await prisma.workoutSession.findMany({
-      where: {
-        groupId,
-        status: SessionStatus.COMPLETED,
-        durationMinutes: {
-          not: null,
+
+    const [sessions, credits] = await Promise.all([
+      prisma.workoutSession.findMany({
+        where: {
+          groupId,
+          status: SessionStatus.COMPLETED,
+          durationMinutes: {
+            not: null,
+          },
+          creditDateLocal: {
+            gte: weekStart,
+          },
         },
-      },
-      select: {
-        userId: true,
-        durationMinutes: true,
-      },
-    });
+        select: {
+          userId: true,
+          durationMinutes: true,
+        },
+      }),
+      prisma.workoutDayCredit.findMany({
+        where: {
+          groupId,
+          weekStartDateLocal: weekStart,
+        },
+      }),
+    ]);
 
     const totalMinutesByUser = new Map<string, number>();
     for (const session of sessions) {
@@ -439,11 +462,16 @@ export class WorkoutService {
       );
     }
 
+    const creditsByParticipant = new Map<string, number>();
+    for (const credit of credits) {
+      creditsByParticipant.set(credit.participantId, (creditsByParticipant.get(credit.participantId) ?? 0) + 1);
+    }
+
     const ranked = rankLeaderboard(
       participants.map((row) => ({
         participantId: row.id,
         displayName: row.user.displayName,
-        completedDays: row.lifetimeCompletedDays,
+        completedDays: creditsByParticipant.get(row.id) ?? 0,
         successfulWeekStreak: row.currentSuccessfulWeekStreak,
         lifetimeCompletedDays: row.lifetimeCompletedDays,
       })),
@@ -463,6 +491,8 @@ export class WorkoutService {
         return formatRankingLine({
           rankLabel: `${index + 1}.`,
           displayName: row.displayName,
+          completedDays: row.completedDays,
+          weeklyTarget: undefined,
           currentWorkoutDayStreak: streak,
           lifetimeCompletedDays: row.lifetimeCompletedDays,
           totalMinutes,

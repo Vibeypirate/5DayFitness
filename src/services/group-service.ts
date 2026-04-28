@@ -12,7 +12,7 @@ import {
   DEFAULT_WEEKLY_TARGET,
 } from '../domain/constants.js';
 import { DateTime, IANAZone } from 'luxon';
-import { getGroupByChatId, listActiveParticipants } from './persistence.js';
+import { buildDisplayName, getGroupByChatId, listActiveParticipants } from './persistence.js';
 
 export class GroupService {
   async detectAndStoreOwner(groupId: string, telegramChatId: string, bot: Bot): Promise<void> {
@@ -28,18 +28,24 @@ export class GroupService {
         username: creator.user.username ?? null,
         firstName: creator.user.first_name,
         lastName: creator.user.last_name ?? null,
-        displayName: creator.user.username
-          ? `@${creator.user.username}`
-          : [creator.user.first_name, creator.user.last_name].filter(Boolean).join(' '),
+        displayName: buildDisplayName({
+          telegramUserId: String(creator.user.id),
+          username: creator.user.username,
+          firstName: creator.user.first_name,
+          lastName: creator.user.last_name,
+        }),
       },
       create: {
         telegramUserId: String(creator.user.id),
         username: creator.user.username ?? null,
         firstName: creator.user.first_name,
         lastName: creator.user.last_name ?? null,
-        displayName: creator.user.username
-          ? `@${creator.user.username}`
-          : [creator.user.first_name, creator.user.last_name].filter(Boolean).join(' '),
+        displayName: buildDisplayName({
+          telegramUserId: String(creator.user.id),
+          username: creator.user.username,
+          firstName: creator.user.first_name,
+          lastName: creator.user.last_name,
+        }),
       },
     });
 
