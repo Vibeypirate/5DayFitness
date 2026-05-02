@@ -19,10 +19,11 @@ All GCP infrastructure has been provisioned and the bot is deployed. Here's what
 
 ### Bot Deployment
 
-- **Service URL**: `https://fitness-tracker-bot-d3bthr76uq-uc.a.run.app`
+- **Service URL**: `https://fitness-tracker-bot-807329620690.us-central1.run.app`
 - **Health Check**: `GET /health` → `200 OK` ✅
 - **Prisma Migrations**: All 8 migrations applied successfully ✅
 - **Database Connection**: Connected to Cloud SQL via Unix socket ✅
+- **Telegram Webhook**: Set and verified ✅
 
 ### Bug Fix
 
@@ -30,53 +31,14 @@ Fixed a critical UTF-8 BOM in `prisma/migrations/20260428234001_add_expiry_remin
 
 ---
 
-## What's Needed to Finish
+## Migration Complete ✅
 
-You need to provide **2 pieces of information** to complete the migration and make the bot fully operational:
+The bot has been deployed to GCP Cloud Run with the new Telegram bot token and webhook secret.
 
-### 1. Railway DATABASE_URL
-
-This is needed to migrate your existing workout data, user records, and group settings from Railway to Google Cloud SQL.
-
-**How to get it:**
-1. Go to https://railway.com/
-2. Open your 5DayFitness project
-3. Click on your PostgreSQL service
-4. Go to the "Connect" tab or "Variables" tab
-5. Copy the `DATABASE_URL` value (looks like `postgresql://user:password@host:port/database`)
-
-### 2. New Telegram Bot Token
-
-**Important:** The old token was compromised (noted in `DEPLOYMENT_HANDOFF.md`). You **must** rotate it before the bot can work safely.
-
-**How to get it:**
-1. Open Telegram and message @BotFather
-2. Send `/mybots`
-3. Select `@FiveDayFitness_bot`
-4. Tap "API Token" → "Revoke current token"
-5. Copy the new token
-
----
-
-## How to Complete the Migration
-
-Once you have both values, run this single command from the project root:
-
-```powershell
-.\scripts\gcp-migrate.ps1
-```
-
-It will prompt you for:
-1. Railway DATABASE_URL
-2. New Telegram bot token
-
-Then it will automatically:
-- Dump your Railway database
-- Restore it to Cloud SQL
-- Update the secrets
-- Redeploy Cloud Run with the real token
-- Register the Telegram webhook
-- Verify everything is healthy
+- **Token updated** in Secret Manager (`telegram-bot-token` version 3)
+- **Webhook secret rotated** (`telegram-webhook-secret` version 3)
+- **Cloud Run redeployed** with latest secrets
+- **Telegram webhook set** and confirmed by Telegram API
 
 ---
 
