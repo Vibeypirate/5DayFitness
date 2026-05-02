@@ -103,6 +103,7 @@ export async function ensureActiveParticipant(groupId: string, userId: string, t
       groupId,
       userId,
       status: ParticipantStatus.ACTIVE,
+      joinedAt: new Date(),
       joinedWeekStartDateLocal: startOfWeekLocal(new Date(), timezone ?? DEFAULT_TIMEZONE),
     },
   });
