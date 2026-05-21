@@ -10,7 +10,7 @@ import { prisma } from '../db.js';
 import { formatRankingLine, rankLeaderboard } from '../domain/leaderboard.js';
 import { calculatePenaltyDistribution } from '../domain/penalties.js';
 import { nextSuccessfulWeekStreak } from '../domain/streaks.js';
-import { endOfWeekLocal, getWeekToSummarizeStart, startOfWeekLocal } from '../domain/time.js';
+import { endOfWeekLocal, getWeekToSummarizeStart, localDate, startOfWeekLocal } from '../domain/time.js';
 import { getEffectiveWeeklyTarget } from '../domain/weekly-target.js';
 
 export class WeeklyRollupService {
@@ -115,7 +115,7 @@ export class WeeklyRollupService {
       const participant = participants.find((entry) => entry.id === row.participantId);
       const effectiveTarget = getEffectiveWeeklyTarget({
         baseWeeklyTarget: group.settings!.weeklyTarget,
-        participantJoinedDateLocal: participant?.joinedAt.toISOString().slice(0, 10) ?? null,
+        participantJoinedDateLocal: participant ? localDate(participant.joinedAt, group.settings!.timezone) : null,
         participantJoinedWeekStartDateLocal: participant?.joinedWeekStartDateLocal ?? null,
         weekStartDateLocal: previousWeekStart,
       });
@@ -449,7 +449,7 @@ export class WeeklyRollupService {
       const completed = counts.get(participant.id) ?? 0;
       const target = getEffectiveWeeklyTarget({
         baseWeeklyTarget: group.settings.weeklyTarget,
-        participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+        participantJoinedDateLocal: localDate(participant.joinedAt, group.settings!.timezone),
         participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
         weekStartDateLocal,
       });

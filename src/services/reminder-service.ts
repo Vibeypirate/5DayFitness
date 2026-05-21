@@ -48,7 +48,7 @@ export class ReminderService {
       const completedDays = creditsByParticipant.get(participant.id) ?? 0;
       const effectiveTarget = getEffectiveWeeklyTarget({
         baseWeeklyTarget: weeklyTarget,
-        participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+        participantJoinedDateLocal: localDate(participant.joinedAt, timezone),
         participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
         weekStartDateLocal: weekStart,
       });
@@ -66,7 +66,7 @@ export class ReminderService {
         const completedDays = creditsByParticipant.get(participant.id) ?? 0;
         const effectiveTarget = getEffectiveWeeklyTarget({
           baseWeeklyTarget: weeklyTarget,
-          participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+          participantJoinedDateLocal: localDate(participant.joinedAt, timezone),
           participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
           weekStartDateLocal: weekStart,
         });
@@ -119,7 +119,7 @@ export class ReminderService {
       const completed = creditsByParticipant.get(participant.id) ?? 0;
       const target = getEffectiveWeeklyTarget({
         baseWeeklyTarget: weeklyTarget,
-        participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+        participantJoinedDateLocal: localDate(participant.joinedAt, timezone),
         participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
         weekStartDateLocal: weekStart,
       });

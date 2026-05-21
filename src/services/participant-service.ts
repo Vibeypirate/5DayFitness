@@ -3,7 +3,7 @@ import { ParticipantStatus, SessionStatus } from '@prisma/client';
 import { prisma } from '../db.js';
 import { formatNetBalanceLine, formatWeekProgressLine } from '../domain/leaderboard.js';
 import { summarizeLedgerRows } from '../domain/penalties.js';
-import { startOfWeekLocal } from '../domain/time.js';
+import { localDate, startOfWeekLocal } from '../domain/time.js';
 import { getEffectiveWeeklyTarget } from '../domain/weekly-target.js';
 import { getParticipant, listActiveParticipants } from './persistence.js';
 
@@ -138,7 +138,7 @@ export class ParticipantService {
     const weekStart = startOfWeekLocal(new Date(), timezone);
     const effectiveTarget = getEffectiveWeeklyTarget({
       baseWeeklyTarget: group?.settings?.weeklyTarget ?? 5,
-      participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+      participantJoinedDateLocal: localDate(participant.joinedAt, timezone),
       participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
       weekStartDateLocal: weekStart,
     });

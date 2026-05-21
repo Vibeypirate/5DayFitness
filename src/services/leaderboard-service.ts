@@ -2,7 +2,7 @@ import { ParticipantStatus, SessionStatus } from '@prisma/client';
 
 import { prisma } from '../db.js';
 import { formatRankingLine, rankLeaderboard } from '../domain/leaderboard.js';
-import { startOfWeekLocal } from '../domain/time.js';
+import { localDate, startOfWeekLocal } from '../domain/time.js';
 import { getEffectiveWeeklyTarget } from '../domain/weekly-target.js';
 
 export class LeaderboardService {
@@ -30,6 +30,9 @@ export class LeaderboardService {
           status: SessionStatus.COMPLETED,
           durationMinutes: {
             not: null,
+          },
+          creditDateLocal: {
+            gte: weekStart,
           },
         },
         select: {
@@ -77,7 +80,7 @@ export class LeaderboardService {
           weeklyTarget: participant
             ? getEffectiveWeeklyTarget({
                 baseWeeklyTarget: weeklyTarget,
-                participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+                participantJoinedDateLocal: localDate(participant.joinedAt, timezone),
                 participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
                 weekStartDateLocal: weekStart,
               })

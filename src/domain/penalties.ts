@@ -18,7 +18,7 @@ export type PenaltyDistributionResult = {
 
 export function summarizeLedgerRows(rows: BalanceLedgerRow[]) {
   const totalOwed = rows
-    .filter((row) => row.type === 'OWED' || row.type === 'LEAVE_PENALTY')
+    .filter((row) => row.type === 'OWED' || row.type === 'LEAVE_PENALTY' || row.type === 'UNRESOLVED')
     .reduce((sum, row) => sum + row.amount, 0);
 
   const totalEarned = rows
