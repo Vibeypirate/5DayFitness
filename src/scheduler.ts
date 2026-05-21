@@ -3,7 +3,7 @@ import { ScheduledJobType } from '@prisma/client';
 
 import { prisma } from './db.js';
 import { buildRailwayTrialReminderResult } from './domain/railway-trial.js';
-import { localDate } from './domain/time.js';
+import { getPreviousWeekStart, localDate } from './domain/time.js';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { ReminderService } from './services/reminder-service.js';
@@ -160,6 +160,37 @@ export function startScheduler(bot: Bot) {
 
         if (weekday === 'Mon' && time === '00:00') {
           await weeklyRollupService.resetCurrentWeek(group.id, now);
+        }
+
+        if (weekday === 'Mon' && time === '08:00') {
+          const previousWeekStart = getPreviousWeekStart(now, group.settings.timezone);
+          const jobKey = `${previousWeekStart}-results`;
+          const existingJob = await prisma.scheduledJobLog.findUnique({
+            where: {
+              groupId_jobType_jobKey: {
+                groupId: group.id,
+                jobType: ScheduledJobType.WEEKLY_SUMMARY,
+                jobKey,
+              },
+            },
+          });
+          if (!existingJob) {
+            const announcement = await weeklyRollupService.buildWeekResultsAnnouncement(group.id, previousWeekStart);
+            if (announcement) {
+              try {
+                await bot.api.sendMessage(Number(group.telegramChatId), announcement, { parse_mode: 'Markdown' });
+                await reminderService.recordReminder(
+                  group.id,
+                  ScheduledJobType.WEEKLY_SUMMARY,
+                  jobKey,
+                  now,
+                  announcement,
+                );
+              } catch (sendError) {
+                logger.warn({ error: sendError instanceof Error ? sendError.message : String(sendError), groupId: group.id }, 'Failed to send week results announcement');
+              }
+            }
+          }
         }
       }
 

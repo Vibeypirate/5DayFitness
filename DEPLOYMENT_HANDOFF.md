@@ -2,6 +2,65 @@
 
 This file is the handoff for the next session. The goal is to choose and execute the best production deployment path so `@FiveDayFitness_bot` runs reliably around the clock without depending on a personal computer staying on.
 
+## Session Update — 2026-05-21
+
+### What was done today
+
+1. **Fixed critical reminder bug** (`src/services/reminder-service.ts`)
+   - `buildReminder()` was only checking daily workouts, not weekly progress
+   - Now counts weekly credits per participant and only reminds people who are actually behind their target
+   - Uses `getEffectiveWeeklyTarget()` so mid-week joiners get correct reduced targets
+   - Reminder message now shows progress: `@user — 2/5`
+
+2. **Added `/auditweek` command**
+   - Anyone in the group can run this to see current-week progress
+   - Shows "Behind target" and "On track" sections separately
+   - Includes days remaining and penalty amount
+
+3. **Added `/lastweekresults` admin command**
+   - Admins can manually trigger last week's results announcement
+   - Works with or without a `WeeklySnapshot` existing in the database
+   - Builds from raw workout credits if snapshot is missing
+
+4. **Added Monday 08:00 automated week results announcement**
+   - Scheduler now sends a clear results message every Monday morning
+   - Format: ✅ Hit target / ❌ Missed target / 💰 Penalties
+   - Uses job log deduplication so it only sends once
+
+5. **Added `/cleardebt @username` admin command**
+   - Calculates net balance from `PenaltyLedger`
+   - Creates a `MANUAL_ADJUSTMENT` entry to zero out debt
+   - Updates `totalPenaltiesOwed` on participant
+   - Bot confirms: "Debt cleared for @user. X baht paid. Net balance is now 0 baht."
+
+6. **Database audit via Cloud Shell**
+   - Connected to Cloud SQL and ran workout/penalty queries
+   - Verified May 11 week: 4/5 participants hit target; only `jazvohra` failed (4/5)
+   - Penalty ledger is currently empty because weekly rollup snapshots were not created during the migration period
+
+7. **Redeployed to GCP Cloud Run**
+   - Latest image pushed to `us-central1-docker.pkg.dev/dayfitness-495010/fitness-tracker/bot:latest`
+   - Service URL: `https://fitness-tracker-bot-d3bthr76uq-uc.a.run.app`
+   - All 34 tests passing, lint clean
+
+### New scripts added
+
+- `scripts/deploy.ps1` — one-command build + push + deploy to Cloud Run
+- `scripts/audit-gcp.ps1` — connects Cloud SQL Proxy and runs audit
+- `scripts/audit-missed-workouts.ts` — Node.js script for historical workout audit
+- `scripts/audit-proof.sql` — SQL proof query for specific weeks
+- `scripts/audit-balance.sql` — SQL balance query for penalty ledger
+- `scripts/audit-cloud-sql.sql` — general missed-workout audit SQL
+
+### What still needs attention
+
+- **Railway migration**: `GCP_MIGRATION_STATUS.md` says Railway data still needs to be migrated to Cloud SQL. The current Cloud SQL database has workout credits but no penalty ledger snapshots.
+- **Telegram token**: Still marked as compromised in the security note below. Rotation via BotFather is recommended.
+- **Webhook URL**: Cloud Run service URL format may have shifted. Verify webhook is still registered correctly.
+- **Weekly rollup for past weeks**: May 4 and May 11 weeks never got `WeeklySnapshot` records created because the scheduler was not fully operational during migration. Use `/lastweekresults` to manually announce, or consider running a backfill script.
+
+---
+
 ## Current State
 
 - Bot username: `@FiveDayFitness_bot`

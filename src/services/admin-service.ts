@@ -1,6 +1,7 @@
 import { AdminActionType, ParticipantStatus, PenaltyLedgerType } from '@prisma/client';
 
 import { prisma } from '../db.js';
+import { summarizeLedgerRows } from '../domain/penalties.js';
 import { startOfWeekLocal } from '../domain/time.js';
 import { logAdminAction } from './persistence.js';
 
@@ -202,6 +203,59 @@ export class AdminService {
     });
 
     return 'Penalty adjustment saved.';
+  }
+
+  async clearDebt(groupId: string, actorUserId: string, targetUserId: string): Promise<string> {
+    const ledgerRows = await prisma.penaltyLedger.findMany({
+      where: { groupId, userId: targetUserId },
+      select: { type: true, amount: true },
+    });
+
+    const balance = summarizeLedgerRows(ledgerRows);
+    const netBalance = balance.netBalance;
+
+    if (netBalance >= 0) {
+      return 'This user does not owe any money.';
+    }
+
+    const adjustmentAmount = Math.abs(netBalance);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.penaltyLedger.create({
+        data: {
+          groupId,
+          userId: targetUserId,
+          type: PenaltyLedgerType.MANUAL_ADJUSTMENT,
+          amount: adjustmentAmount,
+          description: `Debt cleared by admin — ${adjustmentAmount} baht paid`,
+        },
+      });
+
+      const participant = await tx.groupParticipant.findUnique({
+        where: { groupId_userId: { groupId, userId: targetUserId } },
+      });
+
+      if (participant) {
+        await tx.groupParticipant.update({
+          where: { id: participant.id },
+          data: {
+            totalPenaltiesOwed: Math.max(0, participant.totalPenaltiesOwed - adjustmentAmount),
+          },
+        });
+      }
+    });
+
+    await logAdminAction({
+      groupId,
+      actorUserId,
+      actionType: AdminActionType.OVERRIDE_PENALTY,
+      payloadJson: { targetUserId, amount: adjustmentAmount, description: 'Debt cleared' },
+    });
+
+    const user = await prisma.user.findUnique({ where: { id: targetUserId } });
+    const name = user?.username ? `@${user.username}` : user?.displayName ?? 'User';
+
+    return `Debt cleared for ${name}. ${adjustmentAmount} baht paid. Net balance is now 0 baht.`;
   }
 
   async resetBalances(groupId: string, actorUserId: string): Promise<string> {

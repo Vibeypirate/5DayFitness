@@ -7,12 +7,15 @@ import { prisma } from '../db.js';
 
 import { config } from '../config.js';
 import { DEFAULT_MAX_CHECKOUT_HOURS } from '../domain/constants.js';
+import { getPreviousWeekStart } from '../domain/time.js';
 import { logger } from '../logger.js';
 import { AdminService } from '../services/admin-service.js';
 import { ExportService } from '../services/export-service.js';
 import { GroupService } from '../services/group-service.js';
 import { LeaderboardService } from '../services/leaderboard-service.js';
 import { ParticipantService } from '../services/participant-service.js';
+import { ReminderService } from '../services/reminder-service.js';
+import { WeeklyRollupService } from '../services/weekly-rollup-service.js';
 import { WorkoutPhotoReviewService } from '../services/workout-photo-review-service.js';
 import { ensureActiveParticipant, getParticipant, markParticipantPresent, upsertUser } from '../services/persistence.js';
 import { WorkoutService } from '../services/workout-service.js';
@@ -25,6 +28,8 @@ const workoutService = new WorkoutService();
 const workoutPhotoReviewService = new WorkoutPhotoReviewService();
 const adminService = new AdminService();
 const exportService = new ExportService();
+const reminderService = new ReminderService();
+const weeklyRollupService = new WeeklyRollupService();
 
 export function createBot() {
   const bot = new Bot(config.TELEGRAM_BOT_TOKEN);
@@ -170,6 +175,41 @@ export function createBot() {
       });
     } catch (error) {
       await ctx.reply(error instanceof Error ? error.message : 'Weekly summary unavailable.');
+    }
+  });
+
+  bot.command('lastweekresults', async (ctx) => {
+    try {
+      await requireAdmin(ctx);
+      const group = await requireConfiguredGroup(ctx);
+      const previousWeekStart = getPreviousWeekStart(new Date(), group.settings!.timezone);
+      const announcement = await weeklyRollupService.buildWeekResultsAnnouncement(group.id, previousWeekStart);
+      if (announcement) {
+        await ctx.reply(announcement, { parse_mode: 'Markdown' });
+      } else {
+        await ctx.reply('No results found for last week.');
+      }
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Failed to get last week results.');
+    }
+  });
+
+  bot.command('auditweek', async (ctx) => {
+    try {
+      const group = await requireConfiguredGroup(ctx);
+      const audit = await reminderService.buildWeekAudit(
+        group.id,
+        group.settings!.timezone,
+        group.settings!.weeklyTarget,
+        new Date(),
+      );
+      if (audit) {
+        await ctx.reply(audit, { parse_mode: 'Markdown' });
+      } else {
+        await ctx.reply('No active participants to audit.');
+      }
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Week audit failed.');
     }
   });
 
@@ -321,6 +361,17 @@ export function createBot() {
       await ctx.reply(await adminService.overridePenalty(group.id, user.id, target.id, amount, description));
     } catch (error) {
       await ctx.reply(error instanceof Error ? error.message : 'Penalty override failed.');
+    }
+  });
+
+  bot.command('cleardebt', async (ctx) => {
+    try {
+      await requireAdmin(ctx);
+      const { group, user } = await ensureGroupAndActor(ctx);
+      const target = await resolveUserFromArgument(ctx.match);
+      await ctx.reply(await adminService.clearDebt(group.id, user.id, target.id));
+    } catch (error) {
+      await ctx.reply(error instanceof Error ? error.message : 'Clear debt failed.');
     }
   });
 

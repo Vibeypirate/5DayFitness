@@ -352,6 +352,155 @@ export class WeeklyRollupService {
     return `${(totalMinutes / 60).toFixed(1)}h`;
   }
 
+  async buildWeekResultsAnnouncement(groupId: string, weekStartDateLocal: string): Promise<string | null> {
+    const group = await prisma.group.findUnique({
+      where: { id: groupId },
+      include: { settings: true },
+    });
+    if (!group?.settings) {
+      return null;
+    }
+
+    const snapshot = await prisma.weeklySnapshot.findFirst({
+      where: { groupId, weekStartDateLocal },
+      include: {
+        results: {
+          include: { user: true },
+          orderBy: { completedDays: 'desc' },
+        },
+      },
+    });
+
+    if (snapshot) {
+      const winners = snapshot.results.filter((r) => r.metTarget);
+      const losers = snapshot.results.filter((r) => !r.metTarget);
+
+      const lines = [
+        `*Week of ${snapshot.weekStartDateLocal} — Results*`,
+        '',
+      ];
+
+      if (winners.length > 0) {
+        lines.push('✅ *Hit target:*');
+        for (const w of winners) {
+          lines.push(`${w.user.displayName} — ${w.completedDays}/${snapshot.weeklyTarget}`);
+        }
+        lines.push('');
+      }
+
+      if (losers.length > 0) {
+        lines.push('❌ *Missed target:*');
+        for (const l of losers) {
+          lines.push(`${l.user.displayName} — ${l.completedDays}/${snapshot.weeklyTarget}`);
+        }
+        lines.push('');
+      }
+
+      if (losers.length > 0 && winners.length > 0) {
+        const penalty = snapshot.weeklyPenaltyAmount;
+        const split = Math.floor((losers.length * penalty) / winners.length);
+        lines.push('💰 *Penalties:*');
+        for (const l of losers) {
+          lines.push(`${l.user.displayName} owes ${penalty} baht`);
+        }
+        lines.push('');
+        lines.push(`Winners split the pool: ${winners.map((w) => w.user.displayName).join(', ')} each earn ~${split} baht`);
+      } else if (losers.length > 0) {
+        lines.push('💰 *Penalties:*');
+        for (const l of losers) {
+          lines.push(`${l.user.displayName} owes ${snapshot.weeklyPenaltyAmount} baht (pool unresolved — no winners)`);
+        }
+      }
+
+      return lines.join('\n');
+    }
+
+    const participants = (await prisma.groupParticipant.findMany({
+      where: {
+        groupId,
+        status: {
+          in: [ParticipantStatus.ACTIVE, ParticipantStatus.PAUSED, ParticipantStatus.LEFT_GROUP],
+        },
+      },
+      include: { user: true },
+    })).filter((participant) => {
+      if (participant.status !== ParticipantStatus.LEFT_GROUP) {
+        return true;
+      }
+      if (!participant.leftAt) {
+        return false;
+      }
+      return startOfWeekLocal(participant.leftAt, group.settings!.timezone) === weekStartDateLocal;
+    });
+
+    const credits = await prisma.workoutDayCredit.findMany({
+      where: { groupId, weekStartDateLocal },
+    });
+
+    const counts = new Map<string, number>();
+    for (const credit of credits) {
+      counts.set(credit.participantId, (counts.get(credit.participantId) ?? 0) + 1);
+    }
+
+    const winners: Array<{ name: string; completed: number; target: number }> = [];
+    const losers: Array<{ name: string; completed: number; target: number }> = [];
+
+    for (const participant of participants) {
+      const completed = counts.get(participant.id) ?? 0;
+      const target = getEffectiveWeeklyTarget({
+        baseWeeklyTarget: group.settings.weeklyTarget,
+        participantJoinedDateLocal: participant.joinedAt.toISOString().slice(0, 10),
+        participantJoinedWeekStartDateLocal: participant.joinedWeekStartDateLocal,
+        weekStartDateLocal,
+      });
+      const name = participant.user.username ? `@${participant.user.username}` : participant.user.displayName;
+      if (completed >= target) {
+        winners.push({ name, completed, target });
+      } else {
+        losers.push({ name, completed, target });
+      }
+    }
+
+    const lines = [
+      `*Week of ${weekStartDateLocal} — Results*`,
+      '',
+    ];
+
+    if (winners.length > 0) {
+      lines.push('✅ *Hit target:*');
+      for (const w of winners) {
+        lines.push(`${w.name} — ${w.completed}/${w.target}`);
+      }
+      lines.push('');
+    }
+
+    if (losers.length > 0) {
+      lines.push('❌ *Missed target:*');
+      for (const l of losers) {
+        lines.push(`${l.name} — ${l.completed}/${l.target}`);
+      }
+      lines.push('');
+    }
+
+    if (losers.length > 0 && winners.length > 0) {
+      const penalty = group.settings.weeklyPenaltyAmount;
+      const split = Math.floor((losers.length * penalty) / winners.length);
+      lines.push('💰 *Penalties:*');
+      for (const l of losers) {
+        lines.push(`${l.name} owes ${penalty} baht`);
+      }
+      lines.push('');
+      lines.push(`Winners split the pool: ${winners.map((w) => w.name).join(', ')} each earn ~${split} baht`);
+    } else if (losers.length > 0) {
+      lines.push('💰 *Penalties:*');
+      for (const l of losers) {
+        lines.push(`${l.name} owes ${group.settings.weeklyPenaltyAmount} baht (pool unresolved — no winners)`);
+      }
+    }
+
+    return lines.join('\n');
+  }
+
   async resetCurrentWeek(groupId: string, now: Date): Promise<void> {
     const group = await prisma.group.findUnique({
       where: { id: groupId },
