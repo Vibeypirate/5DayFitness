@@ -52,12 +52,41 @@ This file is the handoff for the next session. The goal is to choose and execute
 - `scripts/audit-balance.sql` — SQL balance query for penalty ledger
 - `scripts/audit-cloud-sql.sql` — general missed-workout audit SQL
 
+8. **Full codebase code review** (`CODE_REVIEW_2026-05-21.md`)
+   - Reviewed bot layer, services, domain logic, infrastructure, database schema, and tests
+   - Identified 10 critical, 10 high, 10 medium, and 10 low issues
+   - Full report saved to `CODE_REVIEW_2026-05-21.md`
+
+9. **Fixed leaderboard date filter** (`src/services/leaderboard-service.ts`)
+   - Leaderboard was summing all-time workout minutes as "current week"
+   - Added `creditDateLocal >= weekStart` filter to sessions query
+   - Now shows accurate current-week hours only
+
+10. **Fixed unresolved penalty visibility** (`src/domain/penalties.ts`)
+    - `summarizeLedgerRows` was ignoring `UNRESOLVED` penalty type
+    - `/status`, `/mystats`, `/cleardebt` now correctly show unresolved balances
+
+11. **Fixed joined date timezone bug** (`leaderboard-service.ts`, `reminder-service.ts`, `weekly-rollup-service.ts`, `participant-service.ts`)
+    - `participant.joinedAt.toISOString().slice(0, 10)` extracted UTC date instead of local Bangkok date
+    - Mid-week joiners between 00:00–06:59 Bangkok were getting wrong (higher) weekly targets
+    - All callers now use `localDate(participant.joinedAt, timezone)`
+
+12. **Redeployed fixes to GCP Cloud Run**
+    - Revision: `fitness-tracker-bot-00010-tpn`
+    - All 34 tests passing, lint clean
+
 ### What still needs attention
 
 - **Railway migration**: `GCP_MIGRATION_STATUS.md` says Railway data still needs to be migrated to Cloud SQL. The current Cloud SQL database has workout credits but no penalty ledger snapshots.
 - **Telegram token**: Still marked as compromised in the security note below. Rotation via BotFather is recommended.
-- **Webhook URL**: Cloud Run service URL format may have shifted. Verify webhook is still registered correctly.
 - **Weekly rollup for past weeks**: May 4 and May 11 weeks never got `WeeklySnapshot` records created because the scheduler was not fully operational during migration. Use `/lastweekresults` to manually announce, or consider running a backfill script.
+- **Cloud Run scheduler reliability**: In-process `node-cron` on Cloud Run is unreliable because Cloud Run scales to zero. Enable "Always allocated CPU" + minimum 1 instance, or move to Cloud Scheduler / always-on platform.
+- **Remaining critical issues from code review**:
+  - Race conditions in weekly summary, workout check-in, and workout credit
+  - `overrideComplete` does not update participant stats (streaks, lifetime days)
+  - `buildWeekResultsAnnouncement` uses wrong penalty math when no snapshot exists
+  - Default webhook secret is `"change_me"`
+  - No rate limiting on commands
 
 ---
 
