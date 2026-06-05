@@ -1,5 +1,9 @@
 # 24/7 Deployment Handoff
 
+> **Status: Migrated to Railway** (2026-06-05)
+> The bot is now running on Railway. GCP infrastructure has been decommissioned.
+> Current URL: `https://fitness-tracker-bot-production.up.railway.app`
+
 This file is the handoff for the next session. The goal is to choose and execute the best production deployment path so `@FiveDayFitness_bot` runs reliably around the clock without depending on a personal computer staying on.
 
 ## Session Update — 2026-05-21
@@ -92,6 +96,9 @@ This file is the handoff for the next session. The goal is to choose and execute
 
 ## Current State
 
+- **Platform**: Railway (migrated from GCP on 2026-06-05)
+- **Service URL**: `https://fitness-tracker-bot-production.up.railway.app`
+- **Database**: Railway PostgreSQL
 - Bot username: `@FiveDayFitness_bot`
 - Codebase status:
   - TypeScript build passes
