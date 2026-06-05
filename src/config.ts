@@ -1,4 +1,7 @@
-import 'dotenv/config';
+import { config as dotenvConfig } from 'dotenv';
+
+dotenvConfig();
+dotenvConfig({ path: '.env.local', override: true });
 import { z } from 'zod';
 
 import { DEFAULT_TIMEZONE } from './domain/constants.js';
